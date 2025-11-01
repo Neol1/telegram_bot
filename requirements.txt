@@ -1,0 +1,5 @@
+# Python 3.10+
+python-telegram-bot==20.7
+apscheduler==3.10.4
+Pillow==10.4.0
+qrcode==7.4.2

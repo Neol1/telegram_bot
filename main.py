@@ -8,7 +8,7 @@ from telegram.ext import (
 )
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont                                  
 import qrcode
 import json
 from typing import Dict, List, Tuple
@@ -27,6 +27,9 @@ DB_FILE = "tickets.db"
 RESERVE_TIMEOUT = 60
 SEAT_SIZE = 40
 MARGIN = 20
+
+# تعریف global برای app
+app = None
 
 # فقط در حالت توسعه دیتابیس ریست شود
 if os.getenv("RESET_DB") == "1" and os.path.exists(DB_FILE):
@@ -981,11 +984,14 @@ async def show_support_messages(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("✅ هیچ پیام پشتیبانی در انتظار پاسخ نیست.")
         return
     
+    # استفاده از page=0 برای نمایش اولین صفحه
     await show_support_messages_page(update, context, page=0)
 
 async def show_support_messages_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     """نمایش صفحه‌بندی شده پیام‌های پشتیبانی"""
     user_id = update.effective_user.id
+    logger.info(f"Showing support messages page {page} for user {user_id}")
+    
     limit = 5
     offset = page * limit
     
@@ -1462,7 +1468,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
     
     elif data == "admin_back":
-        await show_admin_panel(update, context)
+        await show_admin_panel_from_callback(update, context)
     
     elif data.startswith("admin_price_event|"):
         event_id = int(data.split("|")[1])
@@ -1547,6 +1553,26 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 logger.error(f"خطا در ارسال پیام به کاربر {target_user_id}: {e}")
             
             await query.message.reply_text("✅ مشکل کاربر به عنوان حل شده علامت گذاری شد.")
+
+async def show_admin_panel_from_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش پنل مدیریت از طریق callback"""
+    query = update.callback_query
+    user_id = query.from_user.id
+    
+    keyboard = [
+        [KeyboardButton("👥 مدیریت ادمین‌ها"), KeyboardButton("💰 گزارش مالی")],
+        [KeyboardButton("🎯 مدیریت قیمت صندلی‌ها")],
+        [KeyboardButton("📊 آمار لحظه‌ای")],
+        [KeyboardButton("👤 لیست کاربران")],
+        [KeyboardButton("📞 پیام‌های پشتیبانی")],
+        [KeyboardButton("🔙 بازگشت")]
+    ]
+    
+    await query.message.reply_text(
+        "🛠 **پنل مدیریت**\n\nلطفاً گزینه مورد نظر را انتخاب کنید:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode='Markdown'
+    )
 
 async def show_user_support_history(update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_id: int):
     """نمایش تاریخچه پیام‌های پشتیبانی کاربر"""
@@ -1809,7 +1835,17 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Callback received: {data} from user: {user_id}")
 
     try:
-        if data.startswith("stats|"):
+        # هندلرهای پشتیبانی - اولویت اول
+        if data.startswith("support_"):
+            await handle_admin_callback(update, context)
+            return
+            
+        # هندلرهای ادمین
+        elif data.startswith("admin_"):
+            await handle_admin_callback(update, context)
+            return
+
+        elif data.startswith("stats|"):
             event_id = int(data.split("|")[1])
             path = await generate_seat_map_image(event_id)
             
@@ -2005,12 +2041,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data == "back_to_events":
             await show_events_list(update, context)
 
-        elif data.startswith("admin_"):
-            await handle_admin_callback(update, context)
-
-        elif data.startswith("support_"):
-            await handle_admin_callback(update, context)
-
         elif data in ["refresh_users", "show_users_list"]:
             await show_users_list(update, context)
 
@@ -2196,12 +2226,8 @@ def main():
 
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_payment_receipt))
 
-    app.add_handler(MessageHandler(
-        (filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, 
-        handle_admin_reply
-    ))
-
     app.add_handler(CallbackQueryHandler(callback_router))
+
     app.add_handler(CallbackQueryHandler(handle_admin_approval_callback, pattern="^admin_(approve|reject)\|"))
 
     print("🤖 Bot started with complete support system...")
@@ -2209,3 +2235,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
